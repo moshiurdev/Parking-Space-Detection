@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Parking Space Occupancy</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>Parking Space Occupancy</h1>
+    <p class="sub">Every slot is cropped from the frame and classified as free or occupied by a lightweight CNN on the server CPU.</p>
+  </header>
+
+  <main>
+    <section class="viewer">
+      <nav class="tabs" role="tablist">
+        <button role="tab" id="tab-replay" class="tab active" aria-selected="true">Dataset replay</button>
+        <button role="tab" id="tab-custom" class="tab" aria-selected="false">Your image, video or camera</button>
+      </nav>
+
+      <div id="replay-controls">
+        <div class="toolbar">
+          <label>Sequence
+            <select id="sequence"></select>
+          </label>
+          <button id="play" class="primary">Play</button>
+          <button id="step" title="Next frame">Step</button>
+          <label>Speed
+            <select id="fps">
+              <option value="1">1 fps</option>
+              <option value="2" selected>2 fps</option>
+              <option value="4">4 fps</option>
+              <option value="8">max 8 fps</option>
+            </select>
+          </label>
+          <label class="check"><input type="checkbox" id="show-gt"> Show errors vs. labels</label>
+        </div>
+        <p id="seq-desc" class="desc"></p>
+      </div>
+
+      <div id="custom-controls" class="hidden">
+        <div class="toolbar">
+          <label class="file">Image <input type="file" id="src-image" accept="image/*"></label>
+          <label class="file">Video <input type="file" id="src-video" accept="video/*"></label>
+          <button id="src-camera">Use camera</button>
+        </div>
+        <div class="toolbar">
+          <span class="step-label">Slots:</span>
+          <button id="draw" title="Click 4 corners per slot">Draw slots</button>
+          <button id="undo">Undo</button>
+          <button id="clear">Clear</button>
+          <label class="file">Load JSON <input type="file" id="slots-file" accept=".json,application/json"></label>
+          <button id="save">Save JSON</button>
+          <span class="sep"></span>
+          <button id="analyse" class="primary">Analyse</button>
+          <button id="live" class="primary hidden">Start live</button>
+        </div>
+        <p id="custom-help" class="desc">Choose an image, a video or your camera. Then draw one polygon per parking slot (click its 4 corners) or load a slots JSON, and press Analyse.</p>
+      </div>
+
+      <div class="canvas-wrap">
+        <canvas id="canvas" width="1280" height="720"></canvas>
+        <div id="empty" class="empty hidden"></div>
+      </div>
+      <div id="replay-footer">
+        <input type="range" id="scrub" min="0" max="0" value="0">
+        <div class="frame-info"><span id="frame-label">–</span><span id="frame-meta"></span></div>
+      </div>
+      <video id="video" class="hidden" playsinline muted loop></video>
+    </section>
+
+    <aside class="panel">
+      <div class="big">
+        <div><span id="free" class="num free">–</span><span class="lbl">free</span></div>
+        <div><span id="occupied" class="num occ">–</span><span class="lbl">occupied</span></div>
+      </div>
+      <dl class="stats">
+        <dt>Slots</dt><dd id="total">–</dd>
+        <dt>Labelled free</dt><dd id="gt-free">–</dd>
+        <dt>Frame accuracy</dt><dd id="gt-acc">–</dd>
+        <dt>Crop slots</dt><dd id="t-crop">–</dd>
+        <dt>CNN (all slots)</dt><dd id="t-model">–</dd>
+        <dt>Round trip</dt><dd id="t-rtt">–</dd>
+        <dt>Running accuracy</dt><dd id="run-acc">–</dd>
+      </dl>
+      <div class="legend">
+        <span><i class="sw free"></i>free</span>
+        <span><i class="sw occ"></i>occupied</span>
+        <span><i class="sw err"></i>wrong vs. label</span>
+        <span><i class="sw draft"></i>slot (not analysed)</span>
+      </div>
+      <p id="model-info" class="model-info"></p>
+      <p id="status" class="status"></p>
+    </aside>
+  </main>
+
+  <footer>
+    Data: <a href="https://web.inf.ufpr.br/vri/databases/parking-lot-database/">PKLot</a> (UFPR, CC BY 4.0) and
+    <a href="http://cnrpark.it/">CNRPark-EXT</a> (CNR, ODbL 1.0). Dataset replay plays recorded frames; your own image,
+    video or camera is processed frame by frame with the slots you draw.
+  </footer>
+  <script src="/static/app.js"></script>
+</body>
+</html>

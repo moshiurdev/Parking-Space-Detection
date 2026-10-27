@@ -1,0 +1,33 @@
+{
+  "arch": "mobilenet_v3_small",
+  "input_size": 96,
+  "no_pretrained": false,
+  "init": "runs/mobilenetv3/best.pt",
+  "train_set": "cnr_ext",
+  "val_set": "none",
+  "train_filter": "date=2015-11-12,2015-11-16,2015-11-20",
+  "val_filter": null,
+  "augment": "standard",
+  "epochs": 2,
+  "samples_per_epoch": 0,
+  "batch_size": 256,
+  "lr": 0.0003,
+  "weight_decay": 0.01,
+  "warmup_epochs": 0.0,
+  "dropout": 0.2,
+  "label_smoothing": 0.05,
+  "class_weighting": "inverse",
+  "val_max": 40000,
+  "seed": 42,
+  "device": "mps",
+  "limit": 0,
+  "name": "mobilenetv3_cnr_ft",
+  "params": 1519906,
+  "train_size": 19233,
+  "train_occupied": 13692,
+  "val_size": 0,
+  "class_weights": [
+    1.4238028526306152,
+    0.5761971473693848
+  ]
+}

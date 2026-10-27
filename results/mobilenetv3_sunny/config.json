@@ -1,0 +1,33 @@
+{
+  "arch": "mobilenet_v3_small",
+  "input_size": 96,
+  "no_pretrained": false,
+  "init": null,
+  "train_set": "pklot_train",
+  "val_set": "pklot_val",
+  "train_filter": "weather=sunny",
+  "val_filter": "weather=sunny",
+  "augment": "standard",
+  "epochs": 12,
+  "samples_per_epoch": 120000,
+  "batch_size": 256,
+  "lr": 0.001,
+  "weight_decay": 0.01,
+  "warmup_epochs": 0.5,
+  "dropout": 0.2,
+  "label_smoothing": 0.05,
+  "class_weighting": "inverse",
+  "val_max": 40000,
+  "seed": 42,
+  "device": "mps",
+  "limit": 0,
+  "name": "mobilenetv3_sunny",
+  "params": 1519906,
+  "train_size": 80452,
+  "train_occupied": 38576,
+  "val_size": 40000,
+  "class_weights": [
+    0.9589817523956299,
+    1.0410182476043701
+  ]
+}

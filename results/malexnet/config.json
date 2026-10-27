@@ -1,0 +1,33 @@
+{
+  "arch": "malexnet",
+  "input_size": 224,
+  "no_pretrained": false,
+  "init": null,
+  "train_set": "pklot_train",
+  "val_set": "pklot_val",
+  "train_filter": null,
+  "val_filter": null,
+  "augment": "standard",
+  "epochs": 12,
+  "samples_per_epoch": 120000,
+  "batch_size": 256,
+  "lr": 0.003,
+  "weight_decay": 0.01,
+  "warmup_epochs": 0.5,
+  "dropout": 0.0,
+  "label_smoothing": 0.05,
+  "class_weighting": "inverse",
+  "val_max": 40000,
+  "seed": 42,
+  "device": "mps",
+  "limit": 0,
+  "name": "malexnet",
+  "params": 55420,
+  "train_size": 170614,
+  "train_occupied": 82148,
+  "val_size": 40000,
+  "class_weights": [
+    0.9629690647125244,
+    1.0370309352874756
+  ]
+}
