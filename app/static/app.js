@@ -49,6 +49,7 @@ function showStats(result, rtt, run) {
   $("free").textContent = result ? result.free : "–";
   $("occupied").textContent = result ? result.occupied : "–";
   $("total").textContent = result ? result.total : "–";
+  $("t-detect").textContent = fmtMs(result?.timing_ms.detect_ms);
   $("t-crop").textContent = fmtMs(result?.timing_ms.crop_ms);
   $("t-model").textContent = fmtMs(result?.timing_ms.model_ms);
   $("t-rtt").textContent = fmtMs(rtt);
@@ -163,16 +164,17 @@ function selectSequence(id, frame = 0) {
 
 const custom = {
   source: null,      // { kind: "image" | "video" | "camera", el, w, h }
-  slots: [],         // polygons in source pixel coordinates
+  auto: true,        // slots are found by the server from the line markings on every analysis
+  slots: [],         // hand-drawn or loaded polygons in source pixel coordinates (when auto is false)
   draft: [],         // points of the slot being drawn
   drawing: false,
   result: null,      // last /api/analyze result for the current slots
+  resultFrame: null, // the video/camera frame that result belongs to (the video keeps moving)
   live: false,
   busy: false,
   raf: null,
   objectUrl: null,
 };
-const grab = document.createElement("canvas");
 
 function stopSource() {
   stopLive();
@@ -191,13 +193,20 @@ function stopSource() {
 function setSource(kind, el, w, h) {
   custom.source = { kind, el, w, h };
   custom.result = null;
+  custom.resultFrame = null;
+  // a new picture starts with automatic slots (slots drawn for another picture would not fit)
+  if (custom.drawing) stopDrawing();
+  custom.auto = true;
+  custom.slots = [];
   $("live").classList.toggle("hidden", kind === "image");
   $("analyse").textContent = kind === "image" ? "Analyse" : "Analyse frame";
   showEmpty("");
   if (kind === "image") renderCustom();
   else renderLoop();
-  if (!custom.slots.length) startDrawing();
   updateHelp();
+  // no drawing needed: analyse straight away (with auto-detected slots unless the user drew some)
+  if (kind === "image") analyseCurrentFrame();
+  else startLive();
 }
 
 function renderLoop() {
@@ -210,8 +219,8 @@ function renderCustom() {
   const src = custom.source;
   if (!src) return;
   const r = custom.result;
-  if (r && r.slots.length === custom.slots.length) {
-    drawResult(src.el, src.w, src.h, r, false);
+  if (r && (custom.auto || r.slots.length === custom.slots.length)) {
+    drawResult(custom.resultFrame || src.el, src.w, src.h, r, false);
   } else {
     canvas.width = src.w;
     canvas.height = src.h;
@@ -251,14 +260,35 @@ function slotsChanged() {
 function updateHelp() {
   const n = custom.slots.length;
   let text;
-  if (!custom.source) text = "Choose an image, a video or your camera.";
+  if (!custom.source) text = "Choose an image, a video or your camera. Slots are found automatically from the painted lines.";
   else if (custom.drawing) text = `Drawing: click the 4 corners of each slot (${n} slot${n === 1 ? "" : "s"} so far). Esc cancels the current slot.`;
-  else if (!n) text = "Draw one polygon per parking slot (Draw slots, then click its 4 corners) or load a slots JSON.";
-  else text = `${n} slot${n === 1 ? "" : "s"}. Press ${custom.source.kind === "image" ? "Analyse" : "Analyse frame or Start live"}.`;
+  else if (custom.auto) text = "Slots are detected automatically from the painted stall lines (works best on top-down views). Draw slots to add or fix slots by hand.";
+  else if (!n) text = "Draw one polygon per parking slot (Draw slots, then click its 4 corners), load a slots JSON, or press Auto-detect.";
+  else text = `${n} hand-drawn slot${n === 1 ? "" : "s"}. Press ${custom.source.kind === "image" ? "Analyse" : "Analyse frame or Start live"}, or Auto-detect to go back to automatic slots.`;
   $("custom-help").textContent = text;
+  $("auto").classList.toggle("active-tool", custom.auto);
+}
+
+/** Switch to hand-edited slots, starting from the ones detected last (so they can be extended or fixed). */
+function useManualSlots() {
+  if (!custom.auto) return;
+  custom.auto = false;
+  custom.slots = (custom.result?.slots || []).map((s) => s.polygon.map(([x, y]) => [Math.round(x), Math.round(y)]));
+  custom.result = null;
+}
+
+function useAutoSlots() {
+  stopDrawing();
+  custom.auto = true;
+  custom.slots = [];
+  custom.result = null;
+  updateHelp();
+  if (custom.source?.kind === "image") analyseCurrentFrame();
+  else if (custom.source && !custom.live) startLive();
 }
 
 function startDrawing() {
+  useManualSlots();
   custom.drawing = true;
   $("draw").classList.add("active-tool");
   canvas.classList.add("drawing");
@@ -303,29 +333,44 @@ document.addEventListener("keydown", (e) => {
 
 async function analyseCurrentFrame() {
   const src = custom.source;
-  if (!src || !custom.slots.length || custom.busy) return false;
+  if (!src || (!custom.auto && !custom.slots.length) || custom.busy) return false;
   custom.busy = true;
   const t0 = performance.now();
   try {
     let blob;
+    let frame = null;
     if (src.kind === "image" && $("src-image").files[0]) {
       blob = $("src-image").files[0];
     } else {
-      grab.width = src.w;
-      grab.height = src.h;
-      grab.getContext("2d").drawImage(src.el, 0, 0, src.w, src.h);
-      blob = await new Promise((resolve) => grab.toBlob(resolve, "image/jpeg", 0.9));
+      frame = document.createElement("canvas");
+      frame.width = src.w;
+      frame.height = src.h;
+      frame.getContext("2d").drawImage(src.el, 0, 0, src.w, src.h);
+      blob = await new Promise((resolve) => frame.toBlob(resolve, "image/jpeg", 0.9));
     }
     const form = new FormData();
     form.append("image", blob, "frame.jpg");
-    form.append("slots_json", JSON.stringify(custom.slots));
+    const auto = custom.auto;
+    if (!auto) form.append("slots_json", JSON.stringify(custom.slots));
     const r = await fetch("/api/analyze", { method: "POST", body: form });
     const res = await r.json();
+    if (auto !== custom.auto) return true; // the user switched modes meanwhile
+    if (auto && r.status === 422) {
+      // no lines found in this frame: keep going (the next video frame may work)
+      custom.result = null;
+      renderCustom();
+      showStats(null);
+      setStatus(res.detail, true);
+      if (src.kind === "image") startDrawing();
+      return true;
+    }
     if (!r.ok) throw new Error(res.detail || `HTTP ${r.status}`);
     custom.result = res;
+    custom.resultFrame = frame; // draw the slots on the frame they were found in
     renderCustom();
     showStats(res, performance.now() - t0);
-    setStatus(`${res.free} of ${res.total} slots free.`);
+    const found = res.auto ? ` (${res.total} found automatically in ${res.timing_ms.detect_ms.toFixed(0)} ms)` : "";
+    setStatus(`${res.free} of ${res.total} slots free${found}.`);
     return true;
   } catch (err) {
     setStatus(err.message, true);
@@ -346,8 +391,8 @@ async function liveLoop() {
 }
 
 function startLive() {
-  if (!custom.slots.length) {
-    setStatus("Draw or load slots first.", true);
+  if (!custom.auto && !custom.slots.length) {
+    setStatus("Draw or load slots first, or press Auto-detect.", true);
     return;
   }
   stopDrawing();
@@ -409,19 +454,22 @@ $("src-camera").addEventListener("click", async () => {
     video.srcObject = stream;
     await video.play();
     setSource("camera", video, video.videoWidth, video.videoHeight);
-    setStatus("Camera on. Point it at a parking area (or a printed lot photo) and draw the slots.");
+    setStatus("Camera on. Point it at a parking area seen from above (or a printed top-down lot photo).");
   } catch (err) {
     setStatus(`Camera: ${err.message}`, true);
   }
 });
 
 $("draw").addEventListener("click", () => (custom.drawing ? stopDrawing() : startDrawing()));
+$("auto").addEventListener("click", useAutoSlots);
 $("undo").addEventListener("click", () => {
+  useManualSlots();
   if (custom.draft.length) custom.draft.pop();
   else custom.slots.pop();
   slotsChanged();
 });
 $("clear").addEventListener("click", () => {
+  useManualSlots();
   custom.slots = [];
   custom.draft = [];
   slotsChanged();
@@ -431,6 +479,7 @@ $("slots-file").addEventListener("change", async (e) => {
   if (!file) return;
   try {
     custom.slots = parseSlotsJson(await file.text());
+    custom.auto = false;
     stopDrawing();
     slotsChanged();
     setStatus(`Loaded ${custom.slots.length} slots.`);
@@ -440,7 +489,8 @@ $("slots-file").addEventListener("change", async (e) => {
   e.target.value = "";
 });
 $("save").addEventListener("click", () => {
-  const body = JSON.stringify({ slots: custom.slots.map((p, i) => ({ id: i + 1, polygon: p })) }, null, 1);
+  const polys = custom.auto ? (custom.result?.slots || []).map((s) => s.polygon) : custom.slots;
+  const body = JSON.stringify({ slots: polys.map((p, i) => ({ id: i + 1, polygon: p })) }, null, 1);
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([body], { type: "application/json" }));
   a.download = "slots.json";
@@ -448,8 +498,8 @@ $("save").addEventListener("click", () => {
   URL.revokeObjectURL(a.href);
 });
 $("analyse").addEventListener("click", () => {
-  if (!custom.slots.length) {
-    setStatus("Draw or load slots first.", true);
+  if (!custom.auto && !custom.slots.length) {
+    setStatus("Draw or load slots first, or press Auto-detect.", true);
     return;
   }
   stopDrawing();

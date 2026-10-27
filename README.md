@@ -18,7 +18,7 @@ Per-slot parking occupancy (free / occupied) from a fixed lot camera, with light
 - **Two ways to reduce the gap, measured:** stronger augmentation (no target data) and brief fine-tuning on 3 days of the target site.
 - **CPU deployment:** models are exported to ONNX and run in ONNX Runtime; latency is reported per frame, not per patch.
 - **Web demo:** a FastAPI app replays test frames from the datasets with slot polygons drawn green or red, a live free-slot count, per-frame timing and (optionally) the errors against the labels.
-- **Your own lot:** load an image, a video file or your webcam in the same page, draw the slots with the mouse (4 clicks each) or load them from JSON, and analyse a single frame or run it live, frame by frame.
+- **Your own lot:** load an image, a video file or your webcam in the same page. For lots seen from above, the slots are found automatically from the painted stall lines and the result appears right away; otherwise draw the slots with the mouse (4 clicks each) or load them from JSON. Video and camera run live, frame by frame.
 - **Reproducible:** day-level splits in [`results/splits.json`](results/splits.json), seeded training, saved configs, metrics and plots in [`results/`](results/), and a test that checks every number in this README against the metrics files.
 
 ## Architecture
@@ -37,7 +37,8 @@ flowchart LR
 | Slot crop | The slot polygon's minimum-area rectangle is rotated by the smallest angle that makes it axis-aligned (so the patch keeps the image's "up") and perspective-warped to 64×64. For an axis-aligned box this equals crop-and-resize, which is how the CNR-EXT patches were made. The CNR-EXT test set uses the dataset's own patches; the demo cuts CNR-EXT frames with this function from the per-camera boxes. |
 | Classifier | MobileNetV3-small: torchvision ImageNet weights, input upsampled to 96×96 inside the model, 2-way head. mAlexNet: 3 conv + 2 FC layers, 224×224 input, from scratch. Resizing and normalisation live in the model, so both take the same 64×64 patches. |
 | Inference | One batched forward pass per frame. The exported ONNX graph includes the resize and normalisation; ONNX Runtime and PyTorch agree to within 1.3e-5 in P(occupied) (`onnx_max_abs_diff` in each `metrics.json`). |
-| Web app | FastAPI backend, plain HTML/CSS/JS frontend with no build step. The browser asks for one frame at a time and draws the polygons on a canvas. For your own video or webcam, the browser grabs the current frame, sends it as JPEG with the slot polygons, and draws the answer on the live picture. |
+| Slot finding (own images) | [`parking/autoslots.py`](parking/autoslots.py), classical computer vision, no training: thin bright paint is isolated with a morphological top-hat (keeping only thin, elongated, white or yellow components that are brighter than the ground on both sides), line segments come from the probabilistic Hough transform, segments along the dominant direction are merged into stall separators and cut where a perpendicular centre line crosses them, separators with the same extent form a bay, double (hairpin) lines are merged, and every gap of 1 to 3 median stall widths becomes 1 to 3 slots, plus one slot past each end of a bay unless it lands on plants. About 60 to 160 ms per image on the M1 CPU. |
+| Web app | FastAPI backend, plain HTML/CSS/JS frontend with no build step. The browser asks for one frame at a time and draws the polygons on a canvas. For your own image, video or webcam, the browser sends the frame as JPEG (with the slot polygons if you drew any) and draws the answer on the frame that was analysed. |
 
 ## Datasets
 
@@ -144,8 +145,9 @@ Validation accuracy on `pklot_val` is above 99.8% after the first epoch for Mobi
 
 ## Limitations
 
-- **No live camera was tested.** The main demo replays recorded dataset frames. The page can also run on a video file or a webcam with slots you draw, but I only tested that path with an image and a video made from PKLot frames, not with a real camera pointed at a parking lot.
-- **Slots must be annotated by hand** for every camera (as in both datasets). There is no automatic slot detection, and a moved camera needs new polygons.
+- **No live camera was tested.** The main demo replays recorded dataset frames. The page can also run on a video file or a webcam, but I only tested that path with images and videos made from PKLot frames and from one aerial photo, plus a quick manual try with free top-down drone clips from [Pexels](https://www.pexels.com/search/videos/parking%20lot%20top%20view/), where automatic slots and live analysis ran but the detection was noticeably less reliable than on the photo (not measured). It was not tested with a real camera pointed at a parking lot.
+- **Automatic slot finding is a heuristic and was not evaluated with numbers.** There is no labelled top-down dataset in this project, so it is only checked on synthetic lots (unit tests) and by eye on one aerial photo (not included, it is a stock image), where it found all 36 stalls (also with the photo shrunk to 40%) and most of the stalls still in the picture after rotating it by 30 degrees. It needs visible painted separators seen from above; on the oblique PKLot and CNRPark-EXT cameras it finds no slots (the lines converge and are mostly hidden by cars), and those lots still need hand-drawn slots, as in both datasets.
+- **Top-down views are outside the training data.** The classifier was trained only on oblique camera views; on that one aerial photo it called every parked car occupied and every empty stall free (a stall holding a shopping-cart corral was called occupied), but its accuracy from above was not measured.
 - **Darkness and glare:** PKLot frames are taken in daylight. CNRPark-EXT has early-morning frames, and on a dark, rainy 07:00 frame of camera 8 the model calls several empty slots occupied, probably because of the low light and headlight reflections (83% of slots correct on that frame).
 - **Crop geometry differs between datasets:** PKLot slots are rotated rectangles cut from the full frame, while CNRPark-EXT ships axis-aligned box crops. Part of the cross-dataset gap may come from this, not only from appearance.
 - **One seed per run.** Differences of a few hundredths of a percent in-domain are within run-to-run noise, which was not measured.
@@ -209,11 +211,11 @@ python -m app.server --checkpoint checkpoints/parking_mobilenetv3.onnx
 
 **Your image, video or camera:**
 
-1. Choose an image or a video file, or press **Use camera** (browsers allow camera access only on `localhost` or HTTPS).
-2. Draw the slots: with **Draw slots** active, click the 4 corners of each slot (**Undo**, **Clear**, Esc cancels the current slot). **Save JSON** downloads them so you can reuse them; **Load JSON** reads `[[[x, y], ...], ...]` or `{"slots": [{"id": 1, "polygon": [[x, y], ...]}]}` in the pixel coordinates of the image or video.
-3. Press **Analyse** (image) or **Analyse frame** / **Start live** (video, camera). Live mode sends one frame at a time, at most about 8 per second.
+1. Choose an image or a video file, or press **Use camera** (browsers allow camera access only on `localhost` or HTTPS). With **Auto-detect** on (the default), the slots are found from the painted lines and the result appears at once; a video or camera starts live analysis, at most about 8 frames per second, finding the slots again in every frame (so a moving drone camera works too).
+2. If no slots are found, or some are missing or wrong, draw them: **Draw slots** starts from the detected slots, and each click of 4 corners adds one (**Undo**, **Clear**, Esc cancels the current slot). Hand-drawn slots stay fixed for the following frames. **Save JSON** downloads the current slots; **Load JSON** reads `[[[x, y], ...], ...]` or `{"slots": [{"id": 1, "polygon": [[x, y], ...]}]}` in the pixel coordinates of the image or video. **Auto-detect** switches back to automatic slots.
+3. Press **Analyse** (image) or **Analyse frame** / **Start live** (video, camera) after changing the slots.
 
-The model was trained on fixed, elevated lot cameras, so a webcam should look down at a parking area (or at a printed photo of one) for the result to mean anything.
+Automatic slots work on lots seen from above (drone, high pole) with painted stall lines. For an oblique camera like the dataset ones, draw the slots once and save them as JSON.
 
 API:
 
@@ -222,7 +224,7 @@ API:
 | `GET /api/sequences` | demo sequences (id, title, frame and slot counts) |
 | `GET /api/sequences/{id}/{i}` | classify frame `i`: per-slot polygon, P(occupied), label if known; free / occupied counts; timings in ms |
 | `GET /api/sequences/{id}/{i}/image` | the frame as JPEG |
-| `POST /api/analyze` | multipart `image` + `slots` (JSON file) or `slots_json` (form field) |
+| `POST /api/analyze` | multipart `image` + `slots` (JSON file) or `slots_json` (form field); with neither, the slots are found automatically (`"auto": true`, `timing_ms.detect_ms`), or 422 if no stall lines are found |
 | `GET /api/info` | model and test accuracy |
 
 ### Tests
@@ -231,7 +233,7 @@ API:
 pytest
 ```
 
-The tests cover slot cropping and orientation, the PKLot and CNR annotation parsers, the day splits, augmentation, the patch-set writer, ONNX export (checked against PyTorch) and the API. They use a randomly initialised model and synthetic images, so they run without the datasets or trained weights. `tests/test_readme_results.py` checks that every result table in this README matches `results/*/metrics.json`.
+The tests cover slot cropping and orientation, the PKLot and CNR annotation parsers, the day splits, augmentation, the patch-set writer, ONNX export (checked against PyTorch), automatic slot finding on synthetic lots (rotated and rescaled, with cars and a planter) and the API. They use a randomly initialised model and synthetic images, so they run without the datasets or trained weights. `tests/test_readme_results.py` checks that every result table in this README matches `results/*/metrics.json`.
 
 ## Project structure
 
@@ -239,6 +241,7 @@ The tests cover slot cropping and orientation, the PKLot and CNR annotation pars
 ├── parking/                # library code
 │   ├── __init__.py         # class names, patch size
 │   ├── slots.py            # slot cropping, PKLot XML and CNR CSV parsers
+│   ├── autoslots.py        # find slots from painted stall lines (own images)
 │   ├── splits.py           # day-level splits
 │   ├── data.py             # patch sets (memory-mapped .npy + metadata .csv), class weights
 │   ├── augment.py          # batched GPU augmentation (standard / strong)

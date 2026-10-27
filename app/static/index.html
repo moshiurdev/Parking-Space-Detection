@@ -47,6 +47,7 @@
         </div>
         <div class="toolbar">
           <span class="step-label">Slots:</span>
+          <button id="auto" class="active-tool" title="Find the slots from the painted stall lines">Auto-detect</button>
           <button id="draw" title="Click 4 corners per slot">Draw slots</button>
           <button id="undo">Undo</button>
           <button id="clear">Clear</button>
@@ -56,7 +57,7 @@
           <button id="analyse" class="primary">Analyse</button>
           <button id="live" class="primary hidden">Start live</button>
         </div>
-        <p id="custom-help" class="desc">Choose an image, a video or your camera. Then draw one polygon per parking slot (click its 4 corners) or load a slots JSON, and press Analyse.</p>
+        <p id="custom-help" class="desc">Choose an image, a video or your camera. Slots are found automatically from the painted lines.</p>
       </div>
 
       <div class="canvas-wrap">
@@ -79,6 +80,7 @@
         <dt>Slots</dt><dd id="total">–</dd>
         <dt>Labelled free</dt><dd id="gt-free">–</dd>
         <dt>Frame accuracy</dt><dd id="gt-acc">–</dd>
+        <dt>Find slots</dt><dd id="t-detect">–</dd>
         <dt>Crop slots</dt><dd id="t-crop">–</dd>
         <dt>CNN (all slots)</dt><dd id="t-model">–</dd>
         <dt>Round trip</dt><dd id="t-rtt">–</dd>
@@ -98,7 +100,7 @@
   <footer>
     Data: <a href="https://web.inf.ufpr.br/vri/databases/parking-lot-database/">PKLot</a> (UFPR, CC BY 4.0) and
     <a href="http://cnrpark.it/">CNRPark-EXT</a> (CNR, ODbL 1.0). Dataset replay plays recorded frames; your own image,
-    video or camera is processed frame by frame with the slots you draw.
+    video or camera is processed frame by frame, with slots detected from the painted lines or drawn by hand.
   </footer>
   <script src="/static/app.js"></script>
 </body>

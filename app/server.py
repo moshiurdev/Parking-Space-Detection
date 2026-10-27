@@ -7,7 +7,9 @@ Run:
 The page plays a recorded sequence of lot frames (built by
 ``scripts/make_demo.py``): for each frame it asks the server to classify every
 slot and draws the slot polygons in green (free) or red (occupied). A lot
-image plus a slot-polygon JSON can also be uploaded.
+image (or a video / camera frame) can also be uploaded: with a slot-polygon
+JSON, or without one, in which case the slots are found automatically from
+the painted line markings (``parking/autoslots.py``).
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import time
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
@@ -25,6 +28,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from parking.autoslots import detect_slots
 from parking.predictor import SlotPredictor
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,6 +48,15 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="Parking Space Occupancy", version="1.0", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+
+@app.middleware("http")
+async def no_stale_page(request, call_next):
+    """Make browsers revalidate the page and its scripts, so an updated demo is never mixed with a cached one."""
+    response = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 @lru_cache(maxsize=1)
@@ -183,8 +196,23 @@ async def analyze(image: UploadFile = File(...), slots: UploadFile | None = File
     elif slots_json:
         raw = slots_json
     else:
-        raise HTTPException(400, "send the slot polygons as a 'slots' file or 'slots_json' field")
+        return analyze_auto(bgr)
     return classify(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), parse_slots(raw))
+
+
+def analyze_auto(bgr: np.ndarray) -> dict:
+    """Find the slots from the line markings, then classify them."""
+    t0 = time.perf_counter()
+    polygons = detect_slots(bgr)[:MAX_SLOTS]
+    detect_ms = (time.perf_counter() - t0) * 1000
+    if not polygons:
+        raise HTTPException(422, "No parking slot lines were found automatically. This works for lots seen "
+                                 "from above with painted stall lines; otherwise draw the slots by hand.")
+    slots = [{"id": i + 1, "polygon": np.round(p, 1).tolist()} for i, p in enumerate(polygons)]
+    result = classify(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), slots)
+    result["auto"] = True
+    result["timing_ms"]["detect_ms"] = round(detect_ms, 2)
+    return result
 
 
 @app.get("/favicon.ico", include_in_schema=False)

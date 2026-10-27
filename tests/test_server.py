@@ -7,7 +7,7 @@ import cv2
 import pytest
 from fastapi.testclient import TestClient
 
-from conftest import lot_image
+from conftest import lot_image, marked_lot_image
 
 
 @pytest.fixture(scope="module")
@@ -87,3 +87,25 @@ def test_analyze_rejects_bad_image(client):
     r = client.post("/api/analyze", files={"image": ("lot.jpg", b"nope", "image/jpeg")},
                     data={"slots_json": "[[[0,0],[1,0],[1,1]]]"})
     assert r.status_code == 400
+
+
+def test_analyze_finds_slots_without_polygons(client):
+    img, stalls = marked_lot_image()
+    data = cv2.imencode(".png", img)[1].tobytes()
+    r = client.post("/api/analyze", files={"image": ("lot.png", data, "image/png")})
+    assert r.status_code == 200
+    res = r.json()
+    assert res["auto"] is True and res["total"] == len(stalls) + 3
+    assert res["free"] + res["occupied"] == res["total"]
+    assert "detect_ms" in res["timing_ms"]
+    assert all(len(s["polygon"]) == 4 for s in res["slots"])
+
+
+def test_analyze_without_lines_asks_for_slots(client):
+    r = client.post("/api/analyze", files={"image": ("lot.jpg", jpeg_bytes(), "image/jpeg")})
+    assert r.status_code == 422 and "draw the slots" in r.json()["detail"]
+
+
+def test_page_is_never_served_stale(client):
+    assert client.get("/").headers["cache-control"] == "no-cache"
+    assert client.get("/static/app.js").headers["cache-control"] == "no-cache"

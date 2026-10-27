@@ -22,6 +22,27 @@ def lot_image(width: int = 320, height: int = 200) -> tuple[np.ndarray, list[np.
     return img, slots
 
 
+def marked_lot_image() -> tuple[np.ndarray, list[np.ndarray]]:
+    """Synthetic top-down lot (BGR, 1000x800) with painted stall lines.
+
+    Two bays of 6 stalls (100 px wide, 250 px long) side by side, split by a
+    centre line, with a few dark and white cars and a planter above the left
+    bay. Returns the image and the 12 stalls between the painted lines."""
+    rng = np.random.default_rng(0)
+    img = np.clip(rng.normal(105, 6, (800, 1000, 3)), 0, 255).astype(np.uint8)
+    white = (235, 235, 235)
+    for y in range(100, 701, 100):
+        cv2.line(img, (100, y), (600, y), white, 6)
+    cv2.line(img, (350, 100), (350, 700), white, 6)
+    cv2.rectangle(img, (110, 15), (340, 85), (40, 140, 40), -1)  # planter (BGR green)
+    for x, y, color in [(130, 115, (40, 40, 45)), (380, 315, (225, 225, 230)), (130, 515, (30, 30, 160))]:
+        cv2.rectangle(img, (x, y), (x + 190, y + 70), color, -1)
+        cv2.rectangle(img, (x + 120, y + 10), (x + 160, y + 60), (50, 50, 50), -1)  # windscreen
+    stalls = [np.float32([[x0, y], [x0 + 250, y], [x0 + 250, y + 100], [x0, y + 100]])
+              for x0 in (100, 350) for y in range(100, 700, 100)]
+    return img, stalls
+
+
 @pytest.fixture(scope="session")
 def tiny_checkpoint(tmp_path_factory) -> Path:
     """Randomly initialised mAlexNet: tests run without the dataset or trained weights."""
